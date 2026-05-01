@@ -36,7 +36,7 @@ return [
     ],
 
     'sso' => [
-        'base_url' => env('SSO_BASE_URL', 'http://41.216.191.39:4000'),
+        'base_url' => env('SSO_BASE_URL', 'https://apisso.qode.my.id'),
         'userinfo_path' => env('SSO_USERINFO_PATH', '/oauth/userinfo'),
     ],
 

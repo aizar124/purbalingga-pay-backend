@@ -69,21 +69,21 @@ Set `FRONTEND_URL` di `.env` supaya backend hanya menerima request dari origin f
 
 ## Deployment VPS
 
-Kalau backend dan frontend kamu dipasang langsung di VPS `41.216.191.39`, pakai pola ini:
+Kalau backend dan frontend kamu dipasang lokal, pakai pola ini:
 
-- Frontend publik: `http://41.216.191.39`
-- Backend API: `http://41.216.191.39:8000`
-- SSO service: `http://41.216.191.39:4000`
+- Frontend publik: `https://smartpay.qode.my.id`
+- Backend API: `https://apismartpay.qode.my.id`
+- SSO service: `https://apisso.qode.my.id`
 
 Env yang paling penting:
 
 ```env
 APP_ENV=production
 APP_DEBUG=false
-APP_URL=http://41.216.191.39:8000
-FRONTEND_URL=http://41.216.191.39
-SSO_BASE_URL=http://41.216.191.39:4000
-SESSION_DOMAIN=41.216.191.39
+APP_URL=https://apismartpay.qode.my.id
+FRONTEND_URL=https://smartpay.qode.my.id
+SSO_BASE_URL=https://apisso.qode.my.id
+SESSION_DOMAIN=.qode.my.id
 ```
 
 Sesudah deploy, jalankan minimal:
