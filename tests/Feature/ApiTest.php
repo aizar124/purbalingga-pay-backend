@@ -100,6 +100,52 @@ class ApiTest extends TestCase
         $this->assertSame(1231500, $card->fresh()->balance_amount);
     }
 
+    public function test_creates_topup_as_pending_and_can_simulate_success(): void
+    {
+        $this->prepareDatabaseOrSkip();
+
+        $user = User::query()->firstWhere('email', 'demo@purbalingga.pay');
+        $token = 'test-token-topup-123';
+
+        ApiToken::query()->create([
+            'user_id' => $user->id,
+            'name' => 'test',
+            'token_hash' => hash('sha256', $token),
+            'abilities' => ['*'],
+            'expires_at' => now()->addDay(),
+        ]);
+
+        $createResponse = $this->withHeader('Authorization', 'Bearer '.$token)
+            ->postJson('/api/transactions', [
+                'type' => 'topup',
+                'amount' => 25000,
+            ]);
+
+        $createResponse->assertCreated()
+            ->assertJsonPath('transaction.status', 'pending')
+            ->assertJsonPath('transaction.nominal', 25000)
+            ->assertJsonStructure([
+                'transaction' => ['id', 'reference_code', 'nominal', 'status'],
+            ]);
+
+        $transactionId = $createResponse->json('transaction.id');
+        $referenceCode = $createResponse->json('transaction.reference_code');
+
+        $this->assertNotEmpty($referenceCode);
+        $this->assertSame(1000000, $user->fresh()->balance);
+
+        $simulateResponse = $this->withHeader('Authorization', 'Bearer '.$token)
+            ->postJson('/api/transactions/'.$transactionId.'/simulate-payment', [
+                'action' => 'success',
+            ]);
+
+        $simulateResponse->assertOk()
+            ->assertJsonPath('transaction.status', 'success')
+            ->assertJsonPath('balance', 1025000);
+
+        $this->assertSame(1025000, $user->fresh()->balance);
+    }
+
     private function prepareDatabaseOrSkip(): void
     {
         if (! $this->databaseIsUsable()) {

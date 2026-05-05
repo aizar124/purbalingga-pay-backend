@@ -77,6 +77,7 @@ class PurbalinggaPayPresenter
     {
         return [
             'id' => $transaction->reference,
+            'referenceCode' => $transaction->reference_code ?? $transaction->reference,
             'title' => $transaction->title,
             'meta' => self::activityMeta($transaction->happened_at),
             'amount' => self::signedMoney($transaction->amount),
@@ -128,7 +129,9 @@ class PurbalinggaPayPresenter
             'redeemed' => 'Sudah Dipakai',
             'blocked' => 'Diblokir',
             'pending' => 'Pending',
+            'success' => 'Berhasil',
             'failed' => 'Gagal',
+            'completed' => 'Selesai',
             default => ucfirst($status),
         };
     }

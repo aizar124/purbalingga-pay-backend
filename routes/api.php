@@ -27,6 +27,7 @@ Route::middleware('api.token')->group(function () {
     Route::post('/cards/{card:code}/unlock', [CardController::class, 'unlock']);
     Route::get('/transactions', [TransactionController::class, 'index']);
     Route::post('/transactions', [TransactionController::class, 'store']);
+    Route::post('/transactions/{id}/simulate-payment', [TransactionController::class, 'simulatePayment'])->whereNumber('id');
     Route::get('/vouchers', [VoucherController::class, 'index']);
     Route::post('/vouchers/{voucher:code}/redeem', [VoucherController::class, 'redeem']);
 });

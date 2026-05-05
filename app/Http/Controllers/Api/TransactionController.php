@@ -8,6 +8,7 @@ use App\Models\Transaction;
 use App\Support\PurbalinggaPayPresenter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 class TransactionController extends Controller
@@ -38,12 +39,30 @@ class TransactionController extends Controller
 
         $user = $request->user();
         $amount = (int) $data['amount'];
-        $signedAmount = $data['type'] === 'topup' ? $amount : -$amount;
+        $merchantName = trim((string) ($data['merchant_name'] ?? ''));
 
-        if ($data['type'] === 'payment' && $user->balance < $amount) {
+        if ($data['type'] === 'topup') {
+            $transaction = DB::transaction(function () use ($user, $amount, $data) {
+                $referenceCode = $this->generateReferenceCode();
+
+                return Transaction::query()->create([
+                    'user_id' => $user->id,
+                    'reference' => $referenceCode,
+                    'reference_code' => $referenceCode,
+                    'type' => 'topup',
+                    'title' => $data['title'] ?? 'Top up saldo',
+                    'description' => $data['description'] ?? null,
+                    'amount' => $amount,
+                    'status' => 'pending',
+                    'happened_at' => now(),
+                ]);
+            });
+
             return response()->json([
-                'message' => 'Saldo tidak cukup.',
-            ], 422);
+                'message' => 'Top up dibuat, silakan lanjut ke simulasi gateway.',
+                'transaction' => $this->topupTransactionResponse($transaction),
+                'user' => PurbalinggaPayPresenter::user($user->fresh()),
+            ], 201);
         }
 
         $card = null;
@@ -71,45 +90,38 @@ class TransactionController extends Controller
                 ->first();
         }
 
-        if ($card && $data['type'] === 'payment' && $card->balance_amount < $amount) {
+        if ($user->balance < $amount) {
+            return response()->json([
+                'message' => 'Saldo tidak cukup.',
+            ], 422);
+        }
+
+        if ($card && $card->balance_amount < $amount) {
             return response()->json([
                 'message' => 'Saldo kartu tidak cukup.',
             ], 422);
         }
 
-        if ($data['type'] === 'topup') {
-            $user->increment('balance', $amount);
-
-            if ($card) {
-                $card->increment('balance_amount', $amount);
-            }
-        } else {
+        $transaction = DB::transaction(function () use ($user, $amount, $data, $card, $merchantName) {
             $user->decrement('balance', $amount);
 
             if ($card) {
                 $card->decrement('balance_amount', $amount);
+                $card->forceFill(['last_used_at' => now()])->save();
             }
-        }
 
-        if ($card) {
-            $card->forceFill(['last_used_at' => now()])->save();
-        }
-
-        $merchantName = trim((string) ($data['merchant_name'] ?? ''));
-
-        $transaction = Transaction::query()->create([
-            'user_id' => $user->id,
-            'reference' => 'TRX-'.strtoupper(Str::random(8)),
-            'type' => $data['type'],
-            'title' => $data['title']
-                ?? ($data['type'] === 'topup'
-                    ? 'Top up saldo'
-                    : ($merchantName !== '' ? 'Bayar '.$merchantName : 'Pembayaran')),
-            'description' => $data['description'] ?? ($merchantName !== '' ? 'Merchant: '.$merchantName : null),
-            'amount' => $signedAmount,
-            'status' => 'completed',
-            'happened_at' => now(),
-        ]);
+            return Transaction::query()->create([
+                'user_id' => $user->id,
+                'reference' => 'TRX-'.strtoupper(Str::random(8)),
+                'type' => 'payment',
+                'title' => $data['title']
+                    ?? ($merchantName !== '' ? 'Bayar '.$merchantName : 'Pembayaran'),
+                'description' => $data['description'] ?? ($merchantName !== '' ? 'Merchant: '.$merchantName : null),
+                'amount' => -$amount,
+                'status' => 'success',
+                'happened_at' => now(),
+            ]);
+        });
 
         return response()->json([
             'message' => 'Transaksi berhasil.',
@@ -117,5 +129,68 @@ class TransactionController extends Controller
             'user' => PurbalinggaPayPresenter::user($user->fresh()),
             'card' => $card ? PurbalinggaPayPresenter::card($card->fresh()) : null,
         ], 201);
+    }
+
+    public function simulatePayment(Request $request, int $id): JsonResponse
+    {
+        $data = $request->validate([
+            'action' => ['required', 'in:success,failed'],
+        ]);
+
+        $transaction = Transaction::query()
+            ->where('id', $id)
+            ->where('user_id', $request->user()->id)
+            ->where('type', 'topup')
+            ->firstOrFail();
+
+        if ($transaction->status !== 'pending') {
+            return response()->json([
+                'message' => 'Transaksi sudah diproses.',
+                'transaction' => $this->topupTransactionResponse($transaction),
+                'balance' => $request->user()->fresh()->balance,
+            ], 409);
+        }
+
+        $user = $request->user();
+
+        $updatedTransaction = DB::transaction(function () use ($transaction, $user, $data) {
+            if ($data['action'] === 'success') {
+                $user->increment('balance', (int) $transaction->amount);
+                $transaction->forceFill(['status' => 'success'])->save();
+            } else {
+                $transaction->forceFill(['status' => 'failed'])->save();
+            }
+
+            return $transaction->fresh();
+        });
+
+        $freshUser = $user->fresh();
+
+        return response()->json([
+            'message' => $data['action'] === 'success' ? 'Simulasi pembayaran berhasil.' : 'Simulasi pembayaran gagal.',
+            'transaction' => $this->topupTransactionResponse($updatedTransaction),
+            'user' => PurbalinggaPayPresenter::user($freshUser),
+            'balance' => $freshUser->balance,
+        ]);
+    }
+
+    private function topupTransactionResponse(Transaction $transaction): array
+    {
+        return [
+            'id' => $transaction->id,
+            'reference_code' => $transaction->reference_code ?? $transaction->reference,
+            'nominal' => (int) $transaction->amount,
+            'status' => $transaction->status,
+            'type' => $transaction->type,
+        ];
+    }
+
+    private function generateReferenceCode(): string
+    {
+        do {
+            $referenceCode = 'TXN-'.now()->format('Ymd').'-'.strtoupper(Str::random(6));
+        } while (Transaction::query()->where('reference_code', $referenceCode)->exists());
+
+        return $referenceCode;
     }
 }
