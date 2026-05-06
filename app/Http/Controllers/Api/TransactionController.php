@@ -40,6 +40,7 @@ class TransactionController extends Controller
         $user = $request->user();
         $amount = (int) $data['amount'];
         $merchantName = trim((string) ($data['merchant_name'] ?? ''));
+        $hasExplicitCardSelection = ! empty($data['card_id']) || ! empty($data['card_code']);
 
         if ($data['type'] === 'topup') {
             $transaction = DB::transaction(function () use ($user, $amount, $data) {
@@ -67,7 +68,7 @@ class TransactionController extends Controller
 
         $card = null;
 
-        if (! empty($data['card_id'])) {
+        if ($hasExplicitCardSelection && ! empty($data['card_id'])) {
             $cardQuery = Card::query()->where('user_id', $user->id);
 
             if (ctype_digit($data['card_id'])) {
@@ -77,17 +78,11 @@ class TransactionController extends Controller
             }
 
             $card = $cardQuery->firstOrFail();
-        } elseif (! empty($data['card_code'])) {
+        } elseif ($hasExplicitCardSelection && ! empty($data['card_code'])) {
             $card = Card::query()
                 ->where('user_id', $user->id)
                 ->where('code', $data['card_code'])
                 ->firstOrFail();
-        } else {
-            $card = Card::query()
-                ->where('user_id', $user->id)
-                ->where('status', 'active')
-                ->orderBy('id')
-                ->first();
         }
 
         if ($user->balance < $amount) {
@@ -96,7 +91,7 @@ class TransactionController extends Controller
             ], 422);
         }
 
-        if ($card && $card->balance_amount < $amount) {
+        if ($hasExplicitCardSelection && $card && $card->balance_amount < $amount) {
             return response()->json([
                 'message' => 'Saldo kartu tidak cukup.',
             ], 422);
